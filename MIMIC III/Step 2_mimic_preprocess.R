@@ -34,24 +34,27 @@ vitals_labs_mean <- read.csv("vitals_labs_mean.csv", header = T)
 vitals_labs_mean_name <- read.csv("dynamic_names.csv", header = T)
 
 
-#------------------------------------ TREATMENTS -----------------------------------------
+#------------------------------------ TREATMENTS -----------------------------------------#
 colnames(interventions)[1] <- "subject_id"
 colnames(interventions)[2:15] <- gsub('^.|.$', '', intervention_name$V1)
 colnames(interventions)[2:15] <- gsub('^.', '', colnames(interventions)[2:15])
 
 interventions$subject_id <- as.factor(interventions$subject_id)
+
+# Aggregate interventions at patient level
 patient_interventions <- interventions %>% group_by(subject_id) %>% summarise(K = n(), pi_vent = sum(vent)/n(), vaso = sum(vaso), vent = sum(vent), adenosine = sum(adenosine), dobutamine = sum(dobutamine), epinephrine = sum(epinephrine), isuprel = sum(isuprel), milrinone = sum(milrinone), norepinephrine = sum(norepinephrine), phenylephrine = sum(phenylephrine), vasopressin = sum(vasopressin), colloid_bolus = sum(colloid_bolus), crystalloid_bolus = sum(crystalloid_bolus), nivdurations = sum(nivdurations))
+
+# Overall means of interventions
 intervention_mean <- patient_interventions %>% summarise(pi_vaso = mean(vaso/K), pi_vent = mean(vent/K), vaso = mean(vaso), vent = mean(vent), adenosine = mean(adenosine), dobutamine = mean(dobutamine), epinephrine = mean(epinephrine), isuprel = mean(isuprel), milrinone = mean(milrinone), norepinephrine = mean(norepinephrine), phenylephrine = mean(phenylephrine), vasopressin = mean(vasopressin), colloid_bolus = mean(colloid_bolus), crystalloid_bolus = mean(crystalloid_bolus), nivdurations = mean(nivdurations))
 
-# Filtering
+# Filter Patients 
 patient_interventions_reduced <- patient_interventions %>% select(subject_id, vent, pi_vent, K) %>% filter(K >= 20) %>% filter(pi_vent < 0.8) %>% filter(pi_vent > 0.2) #%>% filter(K < 50)
 ind <- as.numeric(patient_interventions_reduced$subject_id)-1
 interventions_reduced <- interventions[interventions$subject_id %in% ind,]
 interventions_reduced %>% group_by(subject_id) %>% summarize(n = n())
 
-
-# focus on ventilation first, then on vasopression as treatment
-# get time series of treatments per row
+# Focus on ventilation first, then on vasopression as treatment
+# Extract time-indexed treatment per row
 get_trt_by_t <- function(data, K = 20){
   t <- seq(1,K)
   patients <- unique(data$subject_id)
@@ -69,19 +72,23 @@ treatments <- get_trt_by_t(data = interventions_reduced)
 
 
 
-# ------------------------------- OUTCOME ----------------------------------------------
+# ------------------------------- OUTCOME ----------------------------------------------#
 summary(outcome)
 outcome$mort_icu <- as.factor(outcome$mort_icu)
 outcome$mort_hosp <- as.factor(outcome$mort_hosp)
 
+# Visualize outcome variables
 qplot(outcome$los_icu) 
 qplot(outcome$mort_icu)
 qplot(outcome$mort_hosp)
 
-# ------------------------------- BASELINE COVARIATES ----------------------------------
+# ------------------------------- BASELINE COVARIATES ----------------------------------#
 summary(baseline)
 
+# Cap extreme ages
 baseline$age[baseline$age > 89] <- 90 #instead of 300
+
+# Demographic distributions
 qplot(baseline$age)
 qplot(baseline$gender)
 levels(baseline$ethnicity) <- c("AMERICAN INDIAN", "AMERICAN INDIAN", "ASIAN", "ASIAN", "ASIAN", "ASIAN", "ASIAN", "ASIAN", "ASIAN", "ASIAN", "ASIAN", "ASIAN", 
@@ -93,11 +100,13 @@ qplot(baseline$insurance)
 qplot(baseline$admission_type)
 qplot(baseline$first_careunit)
 
+# Convert timestamp strings to datetime
 baseline$admittime <- ymd_hms(baseline$admittime)
 baseline$dischtime <- ymd_hms(baseline$dischtime)
 baseline$intime <- ymd_hms(baseline$intime)
 baseline$outtime <- ymd_hms(baseline$outtime)
 
+# Compute time durations
 time_in_hospital <- difftime(baseline$dischtime, baseline$admittime, units = "hours")
 time_in_icu <- difftime(baseline$outtime, baseline$intime, units = "hours") 
 time_to_icu <- difftime(baseline$intime, baseline$admittime, units = "mins")
@@ -110,24 +119,25 @@ qplot(time_to_icu)
 levels(baseline$ethnicity) <- c("Other", "Asian", "Black", "Other", "Hispanic", "Other", "Other", "Other", "Other", "Other", "Other", "White")
 levels(baseline$admission_type) <- c("Elective", "Emergency", "Urgent")
 levels(baseline$gender) <- c("Female", "Male")
-# ---------------------------------- MODERATORS ------------------------------------------
+
+# ---------------------------------- MODERATORS ------------------------------------------#
 colnames(vitals_labs_mean)[1] <- "subject_id"
 colnames(vitals_labs_mean)[2:105] <- as.character(vitals_labs_mean_name$LEVEL2)
 
 vitals_labs_mean$subject_id <- as.factor(vitals_labs_mean$subject_id)
 
-# TODO DESCRIPTIVE STATISTICS OF MODERATORS
 var <- colnames(vitals_labs_mean)[2:105]
+
+# Average over time per patient
 vitals_labs_mean_reduced <- vitals_labs_mean %>% group_by(subject_id) %>% summarise_at(vars(var), mean, na.rm = TRUE)
 
 nasum <- sapply(vitals_labs_mean, function(x) sum(is.na(x)))
 naport <- round(nasum / nrow(vitals_labs_mean)*100,2)
 naport <- as.data.frame(t(rbind(colnames(vitals_labs_mean), as.numeric(naport))))
 
+# Select relevant features  
 selection <- c("diastolic blood pressure", "heart rate", "mean blood pressure", "oxygen saturation", "respiratory rate", "systolic blood pressure", "temperature")
-
 vitals_labs_mean_selection <- vitals_labs_mean_reduced %>% select(subject_id, selection)
-
 
 save(interventions,
      patient_interventions,
@@ -138,26 +148,31 @@ save(interventions,
      vitals_labs_mean_selection, file = "mimic_extended.RData")
 
 
-# ----------------------------------- equal number of observations per time step ---------------
+# ----------------------------------- equal number of observations per time step ---------------#
 treatment_name <- "vent"
 baseline_names <- c("age", "ethnicity", "gender", "insurance", "admission_type", "first_careunit")
 moderator_names <- c("diastolic blood pressure", "heart rate", "mean blood pressure", "oxygen saturation", "respiratory rate", "systolic blood pressure", "temperature")
 
-# patient level information
+# Merge outcome and baseline, patient level information
 Y <- outcome %>% select(subject_id, los_icu) %>% mutate(Y = -los_icu) %>% select(-los_icu)
 X0 <- baseline %>% select(subject_id, all_of(baseline_names))
 df_patient <- merge(Y,X0, by = "subject_id")
 
+# Select and rename moderators
 Xt_selection <- vitals_labs_mean %>% select(subject_id, all_of(moderator_names))
 colnames(Xt_selection) <- c("subject_id", "blood_pressure_diastolic", "heart_rate", "blood_pressure_mean", "oxygen_saturation", "respiratory_rate", "blood_pressure_systolic", "temperature")
 Xt_selection <- Xt_selection %>% filter(subject_id %in% df_patient$subject_id)
+
+# Reduce to one observation per time per patient
 Xt_selection_reduced <- Xt_selection %>% group_by(subject_id) %>% filter(row_number() == c(1:(K)))
 Xt_selection_reduced <- Xt_selection_reduced %>% group_by(subject_id) %>% slice(1:n())
 
+# Same process for treatment
 treatments <- interventions %>% select(subject_id, all_of(treatment_name))
 treatments_reduced <- treatments %>% filter(subject_id %in% df_patient$subject_id) %>% group_by(subject_id) %>% filter(row_number() == 1:(K))
 treatments_reduced <- treatments_reduced %>% group_by(subject_id) %>% slice(1:n())
 
+# Merge dynamic treatment + moderators into long format
 datagen <- df_patient
 moderators <- list()
 for(t in 1:K){
@@ -173,10 +188,10 @@ for(t in 1:K){
   datagen <- merge(datagen, temp, by = "subject_id")
 }
 
-
 # data set formatted for DTR function
 MIMIC <- datagen
-
+                
+# Impute missing data
 missing <- as.data.frame(apply(MIMIC, 2,function(x) sum(is.na(x))))
 
 colnames <- colnames(MIMIC)
@@ -196,6 +211,7 @@ impute_median <- function(x){
   ifelse(is.na(x), median(x, na.rm = TRUE), x)
 }
 
+# Use linear model to impute temperature by other vitals
 MIMICimputed <- MIMICimputed %>% mutate_at(vars(toimpute), impute_median)
 MIMICimputed <- MIMICimputed %>% impute_lm(temperature1 ~ blood_pressure_diastolic1 + heart_rate1 + blood_pressure_mean1 + oxygen_saturation1 + respiratory_rate1 + blood_pressure_systolic1)
 MIMICimputed <- MIMICimputed %>% impute_lm(temperature2 ~ blood_pressure_diastolic2 + heart_rate2 + blood_pressure_mean2 + oxygen_saturation2 + respiratory_rate2 + blood_pressure_systolic2)
@@ -208,6 +224,7 @@ MIMICimputed <- MIMICimputed %>% impute_lm(temperature8 ~ blood_pressure_diastol
 MIMICimputed <- MIMICimputed %>% impute_lm(temperature9 ~ blood_pressure_diastolic9 + heart_rate9 + blood_pressure_mean9 + oxygen_saturation9 + respiratory_rate9 + blood_pressure_systolic9)
 MIMICimputed <- MIMICimputed %>% impute_lm(temperature10 ~ blood_pressure_diastolic10 + heart_rate10 + blood_pressure_mean10 + oxygen_saturation10 + respiratory_rate10 + blood_pressure_systolic10)
 
+# Check for remaining missing values
 apply(MIMICimputed, 2,function(x) sum(is.na(x)))
 
 save(MIMIC,
